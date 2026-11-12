@@ -80,7 +80,7 @@ export async function fetchLiveCarparks(userCoords?: [number, number] | null): P
   const ltaLotMap = new Map<string, { available: number; lotType: string }>();
 
   try {
-    const res = await fetch('/api/lta/carparks');
+    const res = await fetch('/api/carparkavailability');
     if (res.ok) {
       const data = await res.json();
       hasAccountKey = Boolean(data.hasAccountKey);

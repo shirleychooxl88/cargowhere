@@ -3,6 +3,10 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+// Root /api serverless endpoints
+import carparkAvailabilityHandler from './api/carparkavailability.ts';
+import healthHandler from './api/health.ts';
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -12,6 +16,17 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
+
+// -------------------------------------------------------------
+// Serverless Handlers from /api (Project Root)
+// -------------------------------------------------------------
+app.all('/api/carparkavailability', (req: Request, res: Response) => {
+  return carparkAvailabilityHandler(req, res);
+});
+
+app.all('/api/health', (req: Request, res: Response) => {
+  return healthHandler(req, res);
+});
 
 const LTA_BASE_URL = 'https://datamall2.mytransport.sg/ltaodataservice';
 
