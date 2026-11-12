@@ -1,0 +1,6 @@
+{
+  "name": "SG Carpark Live",
+  "description": "Real-time carpark lot availability, parking rates, and EV chargers tracker across Singapore.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
