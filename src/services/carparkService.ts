@@ -1,30 +1,58 @@
 import { Carpark, VehicleType } from '../types/carpark';
 import { INITIAL_CARPARKS } from '../data/singaporeCarparks';
 
-interface GovCarparkInfo {
-  total_lots: string;
-  lot_type: string; // 'C' | 'H' | 'Y'
-  lots_available: string;
+export interface LtaBusService {
+  ServiceNo: string;
+  Operator: string;
+  NextBus: {
+    EstimatedArrival: string;
+    Load: 'SEA' | 'SDA' | 'LSD'; // Seats Available | Standing Available | Limited Standing
+    Feature: string;
+    Type: 'SD' | 'DD' | 'BD'; // Single Deck | Double Deck | Bendy
+  };
+  NextBus2?: {
+    EstimatedArrival: string;
+    Load: string;
+    Feature: string;
+    Type: string;
+  };
+  NextBus3?: {
+    EstimatedArrival: string;
+    Load: string;
+    Feature: string;
+    Type: string;
+  };
 }
 
-interface GovCarparkItem {
-  carpark_info: GovCarparkInfo[];
-  carpark_number: string;
-  update_datetime: string;
+export interface LtaTrafficIncident {
+  Type: string;
+  Latitude: number;
+  Longitude: number;
+  Message: string;
 }
 
-interface GovApiResponse {
-  items?: Array<{
-    timestamp: string;
-    carpark_data: GovCarparkItem[];
-  }>;
+export interface LtaTrainAlert {
+  Status: number; // 1 = Normal, 2 = Disrupted
+  Line?: string;
+  Direction?: string;
+  Stations?: string;
+  FreePublicBus?: string;
+  FreeMRTShuttle?: string;
+  Message?: string[];
+}
+
+export interface LtaStatusResponse {
+  hasAccountKey: boolean;
+  isConnected: boolean;
+  testError: string | null;
+  activeEndpoints: string[];
 }
 
 /**
- * Calculates Haversine distance in kilometers between two GPS coordinates
+ * Haversine formula to compute distance in km
  */
 export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371; // Earth's radius in km
+  const R = 6371; // Earth radius in km
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
@@ -38,82 +66,89 @@ export function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lo
 }
 
 /**
- * Fetches real-time carpark availability from Data.gov.sg API.
- * Gracefully integrates live data with curated landmarks and applies slight realistic live drift.
+ * Fetches real-time carpark availability from the backend LTA DataMall proxy (/api/lta/carparks)
  */
 export async function fetchLiveCarparks(userCoords?: [number, number] | null): Promise<{
   carparks: Carpark[];
   lastUpdated: string;
-  source: 'live-api' | 'live-synthesized';
+  source: 'lta-datamall' | 'live-api' | 'live-synthesized';
+  hasAccountKey: boolean;
 }> {
-  let govDataMap = new Map<string, GovCarparkItem>();
-  let source: 'live-api' | 'live-synthesized' = 'live-synthesized';
+  let source: 'lta-datamall' | 'live-api' | 'live-synthesized' = 'live-synthesized';
   let timestamp = new Date().toISOString();
+  let hasAccountKey = false;
+  const ltaLotMap = new Map<string, { available: number; lotType: string }>();
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-
-    const res = await fetch('https://api.data.gov.sg/v1/transport/carpark-availability', {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
+    const res = await fetch('/api/lta/carparks');
     if (res.ok) {
-      const json: GovApiResponse = await res.json();
-      if (json.items && json.items.length > 0 && json.items[0].carpark_data) {
+      const data = await res.json();
+      hasAccountKey = Boolean(data.hasAccountKey);
+
+      if (data.source === 'lta-datamall' && Array.isArray(data.value)) {
+        source = 'lta-datamall';
+        // Parse LTA DataMall v2 format: { CarParkID, Area, Development, Location, AvailableLots, LotType, Agency }
+        for (const item of data.value) {
+          const id = (item.CarParkID || '').toString().toUpperCase();
+          const dev = (item.Development || '').toString().toLowerCase();
+          const lots = Number(item.AvailableLots) || 0;
+          const lotType = (item.LotType || 'C').toUpperCase();
+
+          ltaLotMap.set(id, { available: lots, lotType });
+          if (dev) {
+            ltaLotMap.set(dev, { available: lots, lotType });
+          }
+        }
+      } else if (data.source === 'datagovsg-fallback' && Array.isArray(data.value)) {
         source = 'live-api';
-        timestamp = json.items[0].timestamp || timestamp;
-        for (const item of json.items[0].carpark_data) {
-          govDataMap.set(item.carpark_number.toUpperCase(), item);
+        timestamp = data.timestamp || timestamp;
+        // Parse Data.gov.sg format: { carpark_number, carpark_info: [ { lot_type, lots_available, total_lots } ] }
+        for (const item of data.value) {
+          const id = (item.carpark_number || '').toString().toUpperCase();
+          const carInfo = item.carpark_info?.find((i: any) => i.lot_type === 'C') || item.carpark_info?.[0];
+          if (carInfo) {
+            ltaLotMap.set(id, {
+              available: parseInt(carInfo.lots_available, 10) || 0,
+              lotType: carInfo.lot_type || 'C',
+            });
+          }
         }
       }
     }
-  } catch {
-    // If blocked by CORS or offline, fallback smoothly to synthesized live updates
-    source = 'live-synthesized';
+  } catch (e) {
+    console.warn('Backend proxy fetch failed, falling back to local synthesizer:', e);
   }
 
-  // Merge live availability into carpark database
-  const updatedCarparks: Carpark[] = INITIAL_CARPARKS.map((carpark) => {
-    const updated = { ...carpark, lots: { ...carpark.lots } };
-    const govItem = govDataMap.get(carpark.code.toUpperCase()) || govDataMap.get(carpark.id.toUpperCase());
+  // Merge into initial curated dataset
+  const updatedCarparks: Carpark[] = INITIAL_CARPARKS.map((cp) => {
+    const updated = { ...cp, lots: { ...cp.lots } };
+    const devKey = cp.name.toLowerCase();
+    const ltaMatch =
+      ltaLotMap.get(cp.code.toUpperCase()) ||
+      ltaLotMap.get(cp.id.toUpperCase()) ||
+      ltaLotMap.get(devKey);
 
-    if (govItem) {
-      for (const info of govItem.carpark_info) {
-        const total = parseInt(info.total_lots, 10) || 100;
-        const avail = parseInt(info.lots_available, 10) || 0;
-        if (info.lot_type === 'C') {
-          updated.lots.car = { total, available: Math.min(avail, total) };
-        } else if (info.lot_type === 'Y') {
-          updated.lots.motorcycle = { total, available: Math.min(avail, total) };
-        } else if (info.lot_type === 'H') {
-          updated.lots.heavy = { total, available: Math.min(avail, total) };
-        }
-      }
+    if (ltaMatch) {
+      const total = updated.lots.car.total;
+      updated.lots.car = {
+        total,
+        available: Math.min(ltaMatch.available, total),
+      };
     } else {
-      // Simulate real-time lot fluctuations (+/- 1 to 4 lots change within boundary)
+      // Natural slight drift simulation (+/- 1 to 3 lots)
       const currentAvail = updated.lots.car.available;
       const maxLots = updated.lots.car.total;
-      const delta = Math.floor(Math.random() * 7) - 3; // -3 to +3
+      const delta = Math.floor(Math.random() * 5) - 2;
       const nextAvail = Math.max(2, Math.min(maxLots - 5, currentAvail + delta));
       updated.lots.car = { ...updated.lots.car, available: nextAvail };
-
-      // EV charger fluctuation
-      if (updated.features.evChargers) {
-        const evMax = updated.features.evChargers.total;
-        const evDelta = Math.random() > 0.6 ? (Math.random() > 0.5 ? 1 : -1) : 0;
-        const nextEv = Math.max(0, Math.min(evMax, updated.features.evChargers.available + evDelta));
-        updated.features.evChargers = { ...updated.features.evChargers, available: nextEv };
-      }
     }
 
     if (userCoords) {
       updated.distanceKm = calculateDistanceKm(
         userCoords[0],
         userCoords[1],
-        carpark.coordinates[0],
-        carpark.coordinates[1]
+        cp.coordinates[0],
+        cp.coordinates[1]
       );
     }
 
@@ -125,7 +160,72 @@ export async function fetchLiveCarparks(userCoords?: [number, number] | null): P
     carparks: updatedCarparks,
     lastUpdated: timestamp,
     source,
+    hasAccountKey,
   };
+}
+
+/**
+ * Fetches Next Buses from /api/lta/bus-arrival (LTA DataMall v3 BusArrival)
+ */
+export async function fetchLtaBusArrival(busStopCode = '04121', serviceNo = ''): Promise<{
+  services: LtaBusService[];
+  busStopCode: string;
+  source: string;
+}> {
+  const params = new URLSearchParams();
+  if (busStopCode) params.append('BusStopCode', busStopCode);
+  if (serviceNo) params.append('ServiceNo', serviceNo);
+
+  const res = await fetch(`/api/lta/bus-arrival?${params.toString()}`);
+  if (!res.ok) throw new Error('Failed to fetch bus arrival data');
+  const json = await res.json();
+
+  return {
+    services: json.data?.Services || [],
+    busStopCode: json.data?.BusStopCode || busStopCode,
+    source: json.source || 'simulated',
+  };
+}
+
+/**
+ * Fetches expressway incidents from /api/lta/traffic-incidents
+ */
+export async function fetchLtaTrafficIncidents(): Promise<{
+  incidents: LtaTrafficIncident[];
+  source: string;
+}> {
+  const res = await fetch('/api/lta/traffic-incidents');
+  if (!res.ok) throw new Error('Failed to fetch traffic incidents');
+  const json = await res.json();
+  return {
+    incidents: json.value || [],
+    source: json.source || 'simulated',
+  };
+}
+
+/**
+ * Fetches train alerts from /api/lta/train-alerts
+ */
+export async function fetchLtaTrainAlerts(): Promise<{
+  alert: LtaTrainAlert;
+  source: string;
+}> {
+  const res = await fetch('/api/lta/train-alerts');
+  if (!res.ok) throw new Error('Failed to fetch train alerts');
+  const json = await res.json();
+  return {
+    alert: json.data || { Status: 1, Message: [] },
+    source: json.source || 'simulated',
+  };
+}
+
+/**
+ * Checks LTA DataMall connection status
+ */
+export async function checkLtaStatus(): Promise<LtaStatusResponse> {
+  const res = await fetch('/api/lta/status');
+  if (!res.ok) throw new Error('Failed to check LTA status');
+  return res.json();
 }
 
 /**
@@ -134,7 +234,7 @@ export async function fetchLiveCarparks(userCoords?: [number, number] | null): P
 export function estimateParkingFee(
   carpark: Carpark,
   dayType: 'weekday' | 'saturday' | 'sundayPH',
-  arrivalHour: number, // 0 - 23
+  arrivalHour: number,
   durationMinutes: number
 ): { totalFee: number; breakdownText: string; isWithinGrace: boolean } {
   const graceMinutes = carpark.rates.gracePeriodMinutes || 10;
@@ -146,14 +246,13 @@ export function estimateParkingFee(
     };
   }
 
-  // Typical rates logic
   const isNight = arrivalHour >= 18 || arrivalHour < 7;
   let estimated = 0;
   let breakdown = '';
 
   if (carpark.operator === 'HDB') {
     const isCentral = carpark.district === 'Marina Bay & CBD' || carpark.district === 'Orchard & Tanglin';
-    const ratePer30 = isCentral ? 1.20 : 0.60;
+    const ratePer30 = isCentral ? 1.2 : 0.6;
     if (dayType === 'sundayPH') {
       estimated = 0;
       breakdown = 'HDB Free Parking Scheme on Sundays & Public Holidays (7am - 10:30pm)';
@@ -169,18 +268,17 @@ export function estimateParkingFee(
     }
   } else if (carpark.operator === 'URA') {
     const intervals = Math.ceil(durationMinutes / 30);
-    const rate = 1.40;
+    const rate = 1.4;
     estimated = intervals * rate;
     breakdown = `${intervals} × 30-min blocks @ $1.40/block (Central Area)`;
   } else {
-    // Commercial Mall
     const hours = durationMinutes / 60;
     if (isNight) {
-      estimated = 3.50;
+      estimated = 3.5;
       breakdown = 'Night entry flat rate $3.50';
     } else {
-      const firstHour = 2.60;
-      const sub15 = 0.60;
+      const firstHour = 2.6;
+      const sub15 = 0.6;
       if (hours <= 1) {
         estimated = firstHour;
         breakdown = '1st hour standard rate $2.60';

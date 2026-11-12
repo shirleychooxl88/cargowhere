@@ -13,6 +13,8 @@ interface HeaderProps {
   onLocateMe: () => void;
   isLocating: boolean;
   hasLocation: boolean;
+  onOpenTransitModal: () => void;
+  hasAccountKey: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,6 +29,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLocateMe,
   isLocating,
   hasLocation,
+  onOpenTransitModal,
+  hasAccountKey,
 }) => {
   const formattedTime = new Date(lastUpdated).toLocaleTimeString('en-SG', {
     hour: '2-digit',
@@ -56,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
             </a>
           </div>
 
-          {/* Zone 2: 3-4 clean single-line navigation links */}
+          {/* Zone 2: 4 clean single-line navigation links */}
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
             <button
               onClick={() => setActiveView('map')}
@@ -92,6 +96,13 @@ export const Header: React.FC<HeaderProps> = ({
                   ({favoritesCount})
                 </span>
               )}
+            </button>
+            <button
+              onClick={onOpenTransitModal}
+              className="hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0 pb-0.5 text-slate-600 dark:text-slate-300 flex items-center gap-1.5"
+            >
+              <span>LTA Transit &amp; Traffic</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
             </button>
           </nav>
 

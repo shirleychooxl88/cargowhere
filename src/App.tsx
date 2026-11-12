@@ -12,6 +12,7 @@ import { FilterToolbar } from './components/FilterToolbar';
 import { CarparkMap } from './components/CarparkMap';
 import { CarparkList } from './components/CarparkList';
 import { CarparkDetailModal } from './components/CarparkDetailModal';
+import { LtaTransitAlertsModal } from './components/LtaTransitAlertsModal';
 import { MapPin, Navigation, Compass, Bookmark, Clock, RefreshCw } from 'lucide-react';
 
 export default function App() {
@@ -19,7 +20,9 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
-  const [source, setSource] = useState<'live-api' | 'live-synthesized'>('live-synthesized');
+  const [source, setSource] = useState<'lta-datamall' | 'live-api' | 'live-synthesized'>('live-synthesized');
+  const [hasAccountKey, setHasAccountKey] = useState<boolean>(false);
+  const [isTransitModalOpen, setIsTransitModalOpen] = useState<boolean>(false);
 
   // View state: 'map' | 'list' | 'favorites'
   const [activeView, setActiveView] = useState<'map' | 'list' | 'favorites'>('map');
@@ -98,6 +101,7 @@ export default function App() {
       setCarparks(data.carparks);
       setLastUpdated(data.lastUpdated);
       setSource(data.source);
+      setHasAccountKey(data.hasAccountKey);
     } catch (err) {
       console.error('Failed to load carparks:', err);
     } finally {
@@ -255,6 +259,8 @@ export default function App() {
         onLocateMe={handleLocateMe}
         isLocating={isLocating}
         hasLocation={userCoords !== null}
+        onOpenTransitModal={() => setIsTransitModalOpen(true)}
+        hasAccountKey={hasAccountKey}
       />
 
       {/* Quick KPI Telemetry Strip */}
@@ -263,6 +269,8 @@ export default function App() {
         vehicleType={filters.vehicleType}
         lastUpdated={lastUpdated}
         source={source}
+        hasAccountKey={hasAccountKey}
+        onOpenTransitModal={() => setIsTransitModalOpen(true)}
       />
 
       {/* Filter and Search Bar */}
@@ -426,6 +434,13 @@ export default function App() {
         isFavorite={selectedCarpark ? favorites.includes(selectedCarpark.id) : false}
         onToggleFavorite={toggleFavorite}
         activeVehicleType={filters.vehicleType}
+      />
+
+      {/* LTA Transit & Traffic Hub Modal */}
+      <LtaTransitAlertsModal
+        isOpen={isTransitModalOpen}
+        onClose={() => setIsTransitModalOpen(false)}
+        hasAccountKey={hasAccountKey}
       />
 
       {/* Clean Footer conforming to Anti-Slop Cleanliness */}

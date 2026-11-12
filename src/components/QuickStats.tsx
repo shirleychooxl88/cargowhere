@@ -6,7 +6,9 @@ interface QuickStatsProps {
   carparks: Carpark[];
   vehicleType: VehicleType;
   lastUpdated: string;
-  source: 'live-api' | 'live-synthesized';
+  source: 'lta-datamall' | 'live-api' | 'live-synthesized';
+  hasAccountKey: boolean;
+  onOpenTransitModal: () => void;
 }
 
 export const QuickStats: React.FC<QuickStatsProps> = ({
@@ -14,6 +16,8 @@ export const QuickStats: React.FC<QuickStatsProps> = ({
   vehicleType,
   lastUpdated,
   source,
+  hasAccountKey,
+  onOpenTransitModal,
 }) => {
   // Aggregate stats
   let totalLots = 0;
@@ -44,6 +48,13 @@ export const QuickStats: React.FC<QuickStatsProps> = ({
     minute: '2-digit',
     hour12: true,
   });
+
+  const sourceLabel =
+    source === 'lta-datamall'
+      ? 'LTA DataMall v2'
+      : source === 'live-api'
+      ? 'Data.gov.sg'
+      : 'Live Sync';
 
   return (
     <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 transition-colors">
@@ -86,7 +97,7 @@ export const QuickStats: React.FC<QuickStatsProps> = ({
               <span className="text-xl sm:text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-white">
                 {carparks.length}
               </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">HDB, URA & Malls</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">HDB, URA &amp; Malls</span>
             </div>
           </div>
 
@@ -105,22 +116,34 @@ export const QuickStats: React.FC<QuickStatsProps> = ({
             </div>
           </div>
 
-          {/* Metric 5: Low Capacity Alert & Sync Status */}
+          {/* Metric 5: Live Gov Stream & Transit Feed link */}
           <div className="flex flex-col pt-2 md:pt-0 md:pl-6 col-span-2 md:col-span-1">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Live Gov Sync
-            </span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                Gov Stream
+              </span>
+              <button
+                onClick={onOpenTransitModal}
+                className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
+              >
+                Traffic &amp; Bus Hub &rarr;
+              </button>
+            </div>
             <div className="flex items-baseline gap-2 mt-0.5">
               <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
                 {timeStr}
               </span>
               <span className="text-xs text-slate-400 dark:text-slate-500">
-                {source === 'live-api' ? 'Data.gov.sg' : 'Live Sync'}
+                {sourceLabel}
               </span>
             </div>
-            {criticalCount > 0 && (
+            {criticalCount > 0 ? (
               <span className="text-[11px] font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-0.5">
-                {criticalCount} locations currently crowded
+                {criticalCount} locations crowded
+              </span>
+            ) : (
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-0.5">
+                Nominal traffic flow
               </span>
             )}
           </div>
